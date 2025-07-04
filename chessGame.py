@@ -9,6 +9,7 @@ PIECE_PATH = "./pieces/"  # Folder containing wp.png, bp.png, etc.
 
 class ChessGUI:
     def __init__(self, master, engine_path):
+        self.game_over = False  # Track game state
         self.master = master
         self.engine_path = engine_path
         self.board = chess.Board()
@@ -24,6 +25,9 @@ class ChessGUI:
         self.move_history = tk.Text(master, height=10, width=50, font=("Courier", 10))
         self.move_history.pack()
 
+        self.undo_button = tk.Button(master, text="⏪ Undo Last Turn", command=self.undo_last_turn)
+        self.undo_button.pack(pady=5)
+
         # ✅ Load piece images AFTER Tk root is initialized
         self.piece_images = {}
         for color in ['w', 'b']:
@@ -32,6 +36,20 @@ class ChessGUI:
                 self.piece_images[f"{color}{piece}"] = ImageTk.PhotoImage(img)
 
         self.draw_board()
+
+    def undo_last_turn(self):
+        # Undo both player and stockfish move, if available
+        if len(self.board.move_stack) >= 2:
+            self.board.pop()  # Undo stockfish
+            self.board.pop()  # Undo player
+            self.update_ui()
+            self.status_label.config(text="⏪ Undid last turn.")
+        elif len(self.board.move_stack) == 1:
+            self.board.pop()
+            self.update_ui()
+            self.status_label.config(text="⏪ Undid your move.")
+        else:
+            self.status_label.config(text="Nothing to undo.")
 
     def draw_board(self):
         self.canvas.delete("all")
@@ -54,10 +72,20 @@ class ChessGUI:
                     image = self.piece_images[f"{color}{symbol}"]
                     self.canvas.create_image(x1, y1, image=image, anchor="nw")
 
+    def shade_board(self):
+        self.canvas.create_rectangle(
+            0, 0, 8 * TILE_SIZE, 8 * TILE_SIZE,
+            fill="#444444", stipple="gray50", outline=""
+        )
+
     def on_click(self, event):
         file = event.x // TILE_SIZE
         rank = 7 - (event.y // TILE_SIZE)
         square = chess.square(file, rank)
+
+        if self.game_over:
+            self.status_label.config(text="Game is over. Press undo or reset to continue.")
+            return
 
         if self.selected_square is None:
             piece = self.board.piece_at(square)
@@ -70,6 +98,7 @@ class ChessGUI:
                 self.board.push(move)
                 self.update_ui()
                 self.status_label.config(text=f"You played: {san}")
+                self.check_game_end()
 
                 if not self.board.is_game_over():
                     self.master.after(500, self.stockfish_move)
@@ -88,6 +117,7 @@ class ChessGUI:
             eval_str = "MATE" if score is None else f"{score / 100:+.2f}"
             self.status_label.config(text=f"Stockfish played: {san} | Eval: {eval_str}")
             self.update_ui()
+            self.check_game_end()
 
     def update_ui(self):
         self.draw_board()
@@ -114,6 +144,26 @@ class ChessGUI:
             lines.append(f"{i//2 + 1}. {white_san} {black_san}")
 
         self.move_history.insert(tk.END, "\n".join(lines))
+
+    def check_game_end(self):
+        if self.board.is_checkmate():
+            winner = "Black" if self.board.turn else "White"
+            self.status_label.config(text=f"♔ Checkmate! {winner} wins.")
+            self.game_over = True
+            self.shade_board()
+        elif self.board.is_stalemate():
+            self.status_label.config(text="🤝 Stalemate! It's a draw.")
+            self.game_over = True
+            self.shade_board()
+        elif self.board.is_insufficient_material():
+            self.status_label.config(text="Draw: Insufficient material.")
+            self.game_over = True
+            self.shade_board()
+        elif self.board.can_claim_draw():
+            self.status_label.config(text="Draw by 50-move rule or repetition.")
+            self.game_over = True
+            self.shade_board()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
