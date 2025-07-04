@@ -1,0 +1,125 @@
+import tkinter as tk
+from tkinter import messagebox
+import chess
+import chess.engine
+from PIL import Image, ImageTk
+
+TILE_SIZE = 64
+PIECE_PATH = "./pieces/"  # Folder containing wp.png, bp.png, etc.
+
+class ChessGUI:
+    def __init__(self, master, engine_path):
+        self.master = master
+        self.engine_path = engine_path
+        self.board = chess.Board()
+        self.selected_square = None
+
+        self.canvas = tk.Canvas(master, width=8*TILE_SIZE, height=8*TILE_SIZE)
+        self.canvas.pack()
+        self.canvas.bind("<Button-1>", self.on_click)
+
+        self.status_label = tk.Label(master, text="Your move", font=("Arial", 14))
+        self.status_label.pack()
+
+        self.move_history = tk.Text(master, height=10, width=50, font=("Courier", 10))
+        self.move_history.pack()
+
+        # ✅ Load piece images AFTER Tk root is initialized
+        self.piece_images = {}
+        for color in ['w', 'b']:
+            for piece in ['p', 'n', 'b', 'r', 'q', 'k']:
+                img = Image.open(f"{PIECE_PATH}{color}{piece}.png").resize((TILE_SIZE, TILE_SIZE))
+                self.piece_images[f"{color}{piece}"] = ImageTk.PhotoImage(img)
+
+        self.draw_board()
+
+    def draw_board(self):
+        self.canvas.delete("all")
+        color1 = "#EEEED2"
+        color2 = "#769656"
+
+        for rank in range(8):
+            for file in range(8):
+                color = color1 if (rank + file) % 2 == 0 else color2
+                x1 = file * TILE_SIZE
+                y1 = rank * TILE_SIZE
+                x2 = x1 + TILE_SIZE
+                y2 = y1 + TILE_SIZE
+                self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
+
+                piece = self.board.piece_at(chess.square(file, 7 - rank))
+                if piece:
+                    color = 'w' if piece.color == chess.WHITE else 'b'
+                    symbol = piece.symbol().lower()
+                    image = self.piece_images[f"{color}{symbol}"]
+                    self.canvas.create_image(x1, y1, image=image, anchor="nw")
+
+    def on_click(self, event):
+        file = event.x // TILE_SIZE
+        rank = 7 - (event.y // TILE_SIZE)
+        square = chess.square(file, rank)
+
+        if self.selected_square is None:
+            piece = self.board.piece_at(square)
+            if piece and piece.color == self.board.turn:
+                self.selected_square = square
+        else:
+            move = chess.Move(self.selected_square, square)
+            if move in self.board.legal_moves:
+                san = self.board.san(move)  # ✅ Get SAN before pushing
+                self.board.push(move)
+                self.update_ui()
+                self.status_label.config(text=f"You played: {san}")
+
+                if not self.board.is_game_over():
+                    self.master.after(500, self.stockfish_move)
+            else:
+                self.status_label.config(text="Illegal move. Try again.")
+            self.selected_square = None
+
+    def stockfish_move(self):
+        with chess.engine.SimpleEngine.popen_uci(self.engine_path) as engine:
+            result = engine.analyse(self.board, chess.engine.Limit(time=1))
+            score = result["score"].white().score(mate_score=10000)
+            best_move = engine.play(self.board, chess.engine.Limit(time=1)).move
+            san = self.board.san(best_move)  # ✅ Get SAN before pushing
+            self.board.push(best_move)
+
+            eval_str = "MATE" if score is None else f"{score / 100:+.2f}"
+            self.status_label.config(text=f"Stockfish played: {san} | Eval: {eval_str}")
+            self.update_ui()
+
+    def update_ui(self):
+        self.draw_board()
+        self.show_move_history()
+
+    def show_move_history(self):
+        self.move_history.delete("1.0", tk.END)
+        board_copy = chess.Board()
+        moves = list(self.board.move_stack)
+        lines = []
+
+        for i in range(0, len(moves), 2):
+            white_move = moves[i]
+            white_san = board_copy.san(white_move)
+            board_copy.push(white_move)
+
+            if i + 1 < len(moves):
+                black_move = moves[i + 1]
+                black_san = board_copy.san(black_move)
+                board_copy.push(black_move)
+            else:
+                black_san = ""
+
+            lines.append(f"{i//2 + 1}. {white_san} {black_san}")
+
+        self.move_history.insert(tk.END, "\n".join(lines))
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.title("♟️ Chess Assistant (Player vs Stockfish)")
+
+    # ✅ Update this to your actual Stockfish path
+    stockfish_path = "C:/Users/gunim/Downloads/stockfish/stockfish-windows-x86-64-avx2.exe"
+    app = ChessGUI(root, stockfish_path)
+    root.mainloop()
