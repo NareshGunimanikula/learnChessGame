@@ -28,6 +28,12 @@ class ChessGUI:
         self.undo_button = tk.Button(master, text="⏪ Undo Last Turn", command=self.undo_last_turn)
         self.undo_button.pack(pady=5)
 
+        self.new_game_button = tk.Button(master, text="🔁 New Game", command=self.reset_game)
+        self.new_game_button.pack(pady=5)
+
+        self.explanation_label = tk.Label(master, text="", font=("Arial", 11), fg="gray")
+        self.explanation_label.pack(pady=3)
+
         # ✅ Load piece images AFTER Tk root is initialized
         self.piece_images = {}
         for color in ['w', 'b']:
@@ -78,6 +84,41 @@ class ChessGUI:
             fill="#444444", stipple="gray50", outline=""
         )
 
+    def reset_game(self):
+        self.board.reset()
+        self.selected_square = None
+        self.game_over = False
+        self.status_label.config(text="New game started. Your move.")
+        self.move_history.delete("1.0", tk.END)
+        self.update_ui()
+
+    def explain_move(self, board, move):
+        piece = board.piece_at(move.from_square)
+        to_square = move.to_square
+        from_square = move.from_square
+        piece_name = piece.symbol().upper() if piece else "?"
+
+        explanation = []
+
+        if board.is_capture(move):
+            explanation.append("Captures opponent's piece")
+        if piece_name == 'P' and chess.square_file(to_square) in [2, 3, 4, 5]:
+            explanation.append("Controls the center")
+        if piece_name == 'N' and chess.square_rank(to_square) in [2, 5, 6]:
+            explanation.append("Develops knight toward center")
+        if piece_name == 'B':
+            explanation.append("Develops bishop for control")
+        if piece_name == 'K' and abs(chess.square_file(from_square) - chess.square_file(to_square)) > 1:
+            explanation.append("Castles for king safety")
+        if piece_name == 'Q':
+            explanation.append("Activates queen")
+        if piece_name == 'R':
+            explanation.append("Activates rook or controls open file")
+        if not explanation:
+            explanation.append("Solid developing move")
+
+        return "; ".join(explanation)
+
     def on_click(self, event):
         file = event.x // TILE_SIZE
         rank = 7 - (event.y // TILE_SIZE)
@@ -95,9 +136,12 @@ class ChessGUI:
             move = chess.Move(self.selected_square, square)
             if move in self.board.legal_moves:
                 san = self.board.san(move)  # ✅ Get SAN before pushing
+                board_copy = self.board.copy()
+                explanation = self.explain_move(board_copy, move)
                 self.board.push(move)
                 self.update_ui()
                 self.status_label.config(text=f"You played: {san}")
+                self.explanation_label.config(text="🧠 " + explanation)
                 self.check_game_end()
 
                 if not self.board.is_game_over():
@@ -112,7 +156,10 @@ class ChessGUI:
             score = result["score"].white().score(mate_score=10000)
             best_move = engine.play(self.board, chess.engine.Limit(time=1)).move
             san = self.board.san(best_move)  # ✅ Get SAN before pushing
+            board_copy = self.board.copy()
+            explanation = self.explain_move(board_copy, best_move)
             self.board.push(best_move)
+            self.explanation_label.config(text="🤖 " + explanation)
 
             eval_str = "MATE" if score is None else f"{score / 100:+.2f}"
             self.status_label.config(text=f"Stockfish played: {san} | Eval: {eval_str}")
